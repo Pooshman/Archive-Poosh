@@ -1,0 +1,122 @@
+name: Autograding Tests
+'on':
+- push
+- repository_dispatch
+permissions:
+  checks: write
+  actions: read
+  contents: read
+jobs:
+  run-autograding-tests:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-classroom[bot]'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Warnings Test -- 3pts
+      id: warnings-test-3pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Warnings Test -- 3pts
+        setup-command: cmake -B Builds; make -C Builds > compile_output.txt 2>&1;
+          cat compile_output.txt
+        command: if grep -i 'warning' compile_output.txt; then echo 'Compiler warnings
+          found.'; exit 1; else echo 'No compiler warnings.'; exit 0; fi
+        timeout: 1
+        max-score: 3
+    - name: Extract test -- 30pts
+      id: extract-test-30pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Extract test -- 30pts
+        setup-command: ''
+        command: "./Builds/archive Extract /tmp"
+        timeout: 2
+        max-score: 30
+    - name: Create archive test -- 10pts
+      id: create-archive-test-10pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Create archive test -- 10pts
+        setup-command: ''
+        command: "./Builds/archive Create /tmp"
+        timeout: 2
+        max-score: 10
+    - name: Open archive test -- 10pts
+      id: open-archive-test-10pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Open archive test -- 10pts
+        setup-command: ''
+        command: "./Builds/archive Open /tmp"
+        timeout: 2
+        max-score: 10
+    - name: Add documents test -- 15pts
+      id: add-documents-test-15pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Add documents test -- 15pts
+        setup-command: ''
+        command: "./Builds/archive Add /tmp"
+        timeout: 2
+        max-score: 15
+    - name: Remove documents test -- 15pts
+      id: remove-documents-test-15pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Remove documents test -- 15pts
+        setup-command: ''
+        command: "./Builds/archive Remove /tmp"
+        timeout: 2
+        max-score: 15
+    - name: List documents test -- 10pts
+      id: list-documents-test-10pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: List documents test -- 10pts
+        setup-command: ''
+        command: "./Builds/archive List /tmp"
+        timeout: 2
+        max-score: 10
+    - name: Dump blocks test -- 10pts
+      id: dump-blocks-test-10pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Dump blocks test -- 10pts
+        setup-command: ''
+        command: "./Builds/archive Dump /tmp"
+        timeout: 2
+        max-score: 10
+    - name: Stress Test -- 20pts
+      id: stress-test-20pts
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Stress Test -- 20pts
+        setup-command: ''
+        command: "./Builds/archive Stress /tmp"
+        timeout: 2
+        max-score: 20
+    - name: Extract documents test
+      id: extract-documents-test
+      uses: classroom-resources/autograding-command-grader@v1
+      with:
+        test-name: Extract documents test
+        setup-command: ''
+        command: "./Builds/archive Extract /tmp"
+        timeout: 2
+        max-score: 30
+    - name: Autograding Reporter
+      uses: classroom-resources/autograding-grading-reporter@v1
+      env:
+        WARNINGS-TEST-3PTS_RESULTS: "${{steps.warnings-test-3pts.outputs.result}}"
+        EXTRACT-TEST-30PTS_RESULTS: "${{steps.extract-test-30pts.outputs.result}}"
+        CREATE-ARCHIVE-TEST-10PTS_RESULTS: "${{steps.create-archive-test-10pts.outputs.result}}"
+        OPEN-ARCHIVE-TEST-10PTS_RESULTS: "${{steps.open-archive-test-10pts.outputs.result}}"
+        ADD-DOCUMENTS-TEST-15PTS_RESULTS: "${{steps.add-documents-test-15pts.outputs.result}}"
+        REMOVE-DOCUMENTS-TEST-15PTS_RESULTS: "${{steps.remove-documents-test-15pts.outputs.result}}"
+        LIST-DOCUMENTS-TEST-10PTS_RESULTS: "${{steps.list-documents-test-10pts.outputs.result}}"
+        DUMP-BLOCKS-TEST-10PTS_RESULTS: "${{steps.dump-blocks-test-10pts.outputs.result}}"
+        STRESS-TEST-20PTS_RESULTS: "${{steps.stress-test-20pts.outputs.result}}"
+        EXTRACT-DOCUMENTS-TEST_RESULTS: "${{steps.extract-documents-test.outputs.result}}"
+      with:
+        runners: warnings-test-3pts,extract-test-30pts,create-archive-test-10pts,open-archive-test-10pts,add-documents-test-15pts,remove-documents-test-15pts,list-documents-test-10pts,dump-blocks-test-10pts,stress-test-20pts,extract-documents-test
