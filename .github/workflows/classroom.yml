@@ -96,15 +96,6 @@ jobs:
         command: "./Builds/archive Stress /tmp"
         timeout: 2
         max-score: 20
-    - name: Extract documents test
-      id: extract-documents-test
-      uses: classroom-resources/autograding-command-grader@v1
-      with:
-        test-name: Extract documents test
-        setup-command: ''
-        command: "./Builds/archive Extract /tmp"
-        timeout: 2
-        max-score: 30
     - name: Autograding Reporter
       uses: classroom-resources/autograding-grading-reporter@v1
       env:
@@ -117,6 +108,5 @@ jobs:
         LIST-DOCUMENTS-TEST-10PTS_RESULTS: "${{steps.list-documents-test-10pts.outputs.result}}"
         DUMP-BLOCKS-TEST-10PTS_RESULTS: "${{steps.dump-blocks-test-10pts.outputs.result}}"
         STRESS-TEST-20PTS_RESULTS: "${{steps.stress-test-20pts.outputs.result}}"
-        EXTRACT-DOCUMENTS-TEST_RESULTS: "${{steps.extract-documents-test.outputs.result}}"
       with:
-        runners: warnings-test-3pts,extract-test-30pts,create-archive-test-10pts,open-archive-test-10pts,add-documents-test-15pts,remove-documents-test-15pts,list-documents-test-10pts,dump-blocks-test-10pts,stress-test-20pts,extract-documents-test
+        runners: warnings-test-3pts,extract-test-30pts,create-archive-test-10pts,open-archive-test-10pts,add-documents-test-15pts,remove-documents-test-15pts,list-documents-test-10pts,dump-blocks-test-10pts,stress-test-20pts
