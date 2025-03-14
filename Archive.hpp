@@ -146,7 +146,7 @@ namespace ECE141 {
         time_t timeStamp; //stores time file was added to archive
 
         //block data payload (924 bytes)
-        uint8_t blockData[kPayloadSize]; 
+        uint8_t data[kPayloadSize]; 
 
         //current Block mode (free or in use)
         BlockMode mode;
@@ -161,11 +161,43 @@ namespace ECE141 {
     //--------------------------------------------------------------------------------
     //BLOCK MANAGER: Block status class (to keep track of free/occupied blocks)
     //--------------------------------------------------------------------------------
+    class BlockManager {
+    public:
+        BlockManager() = default;
+        
+        // Find free blocks for file storage
+        size_t findFreeBlocks(size_t blockCount);
+        
+        // Mark blocks as used or free
+        bool markBlocksAsUsed(size_t startBlock, size_t count);
+        bool markBlocksAsFree(size_t startBlock, size_t count);
+        
+        // Track file locations
+        bool addFileEntry(const std::string& filename, size_t startBlock, size_t blockCount);
+        bool removeFileEntry(const std::string& filename);
+        std::pair<size_t, size_t> findFileEntry(const std::string& filename);
+        
+        // Get all file entries for listing
+        std::map<std::string, std::pair<size_t, size_t>> getAllFileEntries() const;
+        
+    private:
+        std::vector<bool> blockStatus; // Track free/used blocks
+        std::map<std::string, std::pair<size_t, size_t>> fileEntries; // filename -> (startBlock, blockCount)
+    };
+
 
     //BLOCK VISITOR: function to visit each block
     using BlockVisitor = std::function<bool(Block &aBlock, size_t aPos)>;
     
+    //--------------------------------------------------------------------------------
+    //CHUNKER: class to chunk file into blocks
+    //--------------------------------------------------------------------------------
     class Chunker {
+
+    protected:
+        std::fstream &stream;
+        size_t streamSize;
+
     public:
         Chunker(std::fstream &aStream) : stream(aStream) {
             stream.seekg(0, std::ios::end);
@@ -189,30 +221,35 @@ namespace ECE141 {
             
             return theResult;
         }
-        
-    protected:
-        std::fstream &stream;
-        size_t streamSize;
     };
 
     //What other classes/types do we need?
     //example code professor gave for Chunk class
     using VisitChunk = std::function<bool(Block &aBlock, size_t aPos)>;
 
-    
+
     class Archive {
     protected:
         
         //constructor
         Archive(const std::string &aFullPath, AccessMode aMode);  //protected for factory pattern
 
+        //read and write to block
         bool readBlock(Block& aBlock, size_t anIndex);
         bool writeBlock(Block& aBlock, size_t anIndex);
+
+        //notify archive observers
+        void notifyObservers(ActionType anAction, const std::string &aName, bool status);
+
+        //UTILITY
+        std::string extractFilename(const std::string &aFullPath) const; //extracts filename from path
+        size_t calculateRequiredBlocks(size_t fileSize) const; //finds num blocks needed for file
 
         //data members
         std::fstream stream; //file stream
         std::string aPath; //file path
         AccessMode mode; //mode to tell whether it's existing or new archive
+        BlockManager blockManager; //block manager to keep track of free/occupied blocks
 
         //to integrate later (during final?)
         std::vector<std::shared_ptr<IDataProcessor>> processors;
@@ -243,85 +280,82 @@ namespace ECE141 {
         ArchiveStatus<std::string> getFullPath() const; //get archive path (including .arc extension)
 
 
-        //ROUGH FUNCTION IMPLEMENTATIONS
-        /*
-        We need Archive functions to add, extract, remove, list, debug, 
-        compact (do we need that rn? IDataProcessor is for next assignment), read, write, etc.
-        */
-        Archive createArchive() {
-            if (mode == AccessMode::AsNew) {
-                //create the Archive
-                //initialize stream, opener or something?
-            }
-            else {
-                throw std::runtime_error("Cannot create archive in existing file");
-            }
-        };
+        // //ROUGH FUNCTION IMPLEMENTATIONS
+        // /*
+        // We need Archive functions to add, extract, remove, list, debug, 
+        // compact (do we need that rn? IDataProcessor is for next assignment), read, write, etc.
+        // */
+        // Archive createArchive() {
+        //     if (mode == AccessMode::AsNew) {
+        //         //create the Archive
+        //         //initialize stream, opener or something?
+        //     }
+        //     else {
+        //         throw std::runtime_error("Cannot create archive in existing file");
+        //     }
+        // };
 
-        bool openArchive() {
-            if (mode == AccessMode::AsExisting) {
-                stream.open(aPath, std::ios::in | std::ios::out | std::ios::binary);
-                if (!stream.is_open()) {
-                    throw std::runtime_error("Failed to open archive");
-                }
-                return true;
-            }
-            else {
-                throw std::runtime_error("Cannot open archive in new file");
-            }
-        }
+        // bool openArchive() {
+        //     if (mode == AccessMode::AsExisting) {
+        //         stream.open(aPath, std::ios::in | std::ios::out | std::ios::binary);
+        //         if (!stream.is_open()) {
+        //             throw std::runtime_error("Failed to open archive");
+        //         }
+        //         return true;
+        //     }
+        //     else {
+        //         throw std::runtime_error("Cannot open archive in new file");
+        //     }
+        // }
 
-        bool readBlock(Block &aBlock, size_t anIndex) {
-            //move read pointer to block anIndex
-            stream.seekg(anIndex * blockSize);
-            //read block
-            stream.read((char*)&aBlock, sizeof(Block));
-            //stream error checking
-            bool theResult{stream};
-            return theResult;
-        };
-        bool writeBlock(Block &aBlock, size_t anIndex) {
-            //move write pointer to index
-            stream.seekp(anIndex * blockSize);
-            //write to block
-            stream.write((char*)&aBlock, sizeof(Block));
-            //stream error checking
-            bool theResult{stream}; //why {}? How does this work?
-            return theResult;
-        }
-        bool addFile(const std::string &aPath) {
-            //check duplicate, make sure path doesn't exist yet
-            if (verifyPath(aPath)) {
-                //open file stream
-                std::fstream theStream(aPath);
-                if (theStream.good()) {
-                    Block theBlock;
-                    Chunker theChunk;
-                    //
-                }
-            }
-            return false;
-        }
-        bool removeFile(const std::string &aPath) {
-            if (verifyPath(aPath)) {
-                //find blocks corresponding to file
-                //remove blocks, mark them free (BLOCKSTATUS)
-                //close file stream
-                return true;
-            }
-            return false;
-        }
-        bool List(const std::string &aSequenceName) { //list files?
-            return false;
-        } 
-        bool Extract(const std::string &aSequenceName) { //extract file data
-            //is this aSequenceName a file path?
+        // bool readBlock(Block &aBlock, size_t anIndex) {
+        //     //move read pointer to block anIndex
+        //     stream.seekg(anIndex * blockSize);
+        //     //read block
+        //     stream.read((char*)&aBlock, sizeof(Block));
+        //     //stream error checking
+        //     bool theResult{stream};
+        //     return theResult;
+        // };
+        // bool writeBlock(Block &aBlock, size_t anIndex) {
+        //     //move write pointer to index
+        //     stream.seekp(anIndex * blockSize);
+        //     //write to block
+        //     stream.write((char*)&aBlock, sizeof(Block));
+        //     //stream error checking
+        //     bool theResult{stream}; //why {}? How does this work?
+        //     return theResult;
+        // }
+        // bool addFile(const std::string &aPath) {
+        //     //check duplicate, make sure path doesn't exist yet
+        //     if (verifyPath(aPath)) {
+        //         //open file stream
+        //         std::fstream theStream(aPath);
+        //         if (theStream.good()) {
+        //             Block theBlock;
+        //             Chunker theChunk;
+        //             //
+        //         }
+        //     }
+        //     return false;
+        // }
+        // bool removeFile(const std::string &aPath) {
+        //     if (verifyPath(aPath)) {
+        //         //find blocks corresponding to file
+        //         //remove blocks, mark them free (BLOCKSTATUS)
+        //         //close file stream
+        //         return true;
+        //     }
+        //     return false;
+        // }
+        // bool List(const std::string &aSequenceName) { //list files?
+        //     return false;
+        // } 
+        // bool Extract(const std::string &aSequenceName) { //extract file data
+        //     //is this aSequenceName a file path?
 
-            return false;
-        }
-
-        //STUDENT: add anything else you want here, (e.g. blocks?)...
-        //Do we want this as private?
+        //     return false;
+        // }
     };
 }
 
