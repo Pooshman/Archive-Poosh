@@ -224,10 +224,6 @@ namespace ECE141 {
 
     class Archive {
     protected:
-        
-        //constructor
-        Archive(const std::string &aFullPath, AccessMode aMode);  //protected for factory pattern
-
         //read and write to block
         bool readBlock(Block& aBlock, size_t anIndex);
         bool writeBlock(Block& aBlock, size_t anIndex);
@@ -250,9 +246,10 @@ namespace ECE141 {
         std::vector<std::shared_ptr<ArchiveObserver>> observers;
 
     public:
-
+    
+        Archive(const std::string &aFullPath, AccessMode aMode);
         ~Archive();  
-
+        
         //static factory methods to create/open archive
         static    ArchiveStatus<std::shared_ptr<Archive>> createArchive(const std::string &anArchiveName);
         static    ArchiveStatus<std::shared_ptr<Archive>> openArchive(const std::string &anArchiveName);
