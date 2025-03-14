@@ -279,7 +279,3 @@ Your solution will be graded using the following rubric:
 ## Submitting your work 
 Due Mar 10, 2025 at 11:30pm  (PST)
 Make sure to turn in your code, and update the associated `student.json` file. 
-
-
-
-
