@@ -16,31 +16,41 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <functional>
+#include <map>
+#include <cstring>
+#include <ctime>
 
 namespace ECE141 {
     //NOTE: enum is global scope, enum class is local scope (avoids name conflicts)
-    enum class ActionType {added, extracted, removed, listed, dumped, compacted};
-    //to tell if we are creating new archive or opening existing one
-    enum class AccessMode {AsNew, AsExisting}; //you can change values (but not names) of this enum
+    //you can change values (but not names) of this enum
+
+    //GLOBAL ENUMS
+    enum class ActionType {added, extracted, removed, listed, dumped, compacted}; //actions that can be performed on archive
+    enum class AccessMode {AsNew, AsExisting}; //mode to open archive
     enum class BlockMode {free, inUse}; //block status
 
     /*
-    Observer class to observe the actions of the archive
-        - Kinda like a composite! (storing list of Observers, calling their operator())
-
     NOTE: If the user called the "list", "compact", or "dump" commands on your archive, there is no specific document. In that case, 
     just pass an empty string as the value for the `aName` argument to the observers, along with the action-type, and the 
     result status.
     */
+
+    //--------------------------------------------------------------------------------
+    //ARCHIVE OBSERVER: class to observe the actions of the archive
+    //- Kinda like a composite! (storing list of Observers, calling their operator())
+    //--------------------------------------------------------------------------------    
     struct ArchiveObserver {
-        void operator()(ActionType anAction, const std::string &aName, bool status);
+        virtual void operator()(ActionType anAction, const std::string &aName, bool status);
+        virtual ~ArchiveObserver() = default;
     };
 
-    /*
-    Class to process files and reverse the process (i.e. compress, decompress)
-    FOR ZIP FILES
-    Not implementing right now, for next assignment (maybe final?)
-    */
+
+    //--------------------------------------------------------------------------------
+    // IDATA PROCESSOR: Class to process files and reverse processing (i.e. compress, decompress)
+    // FOR ZIP FILES
+    // Not implementing right now, for next assignment (maybe final?)
+    //--------------------------------------------------------------------------------
     class IDataProcessor {
     public:
         virtual std::vector<uint8_t> process(const std::vector<uint8_t>& input) = 0;
@@ -55,14 +65,15 @@ namespace ECE141 {
         badBlockHash, badBlockNumber, badBlockLength, badBlockDataLength, badBlockTypeLength
     };
 
+    //--------------------------------------------------------------------------------
+    //ARCHIVE STATUS: error-handling wrapper class for Archive
+    //--------------------------------------------------------------------------------
     template<typename T>
-    class ArchiveStatus { //what's this class for? Define
+    class ArchiveStatus {
     public:
-        // Constructor for success case
-        /*
-        NOTE: explicit keyword means you can't do 
-        ArchiveStatus<bool> status = true; (must be ArchiveStatus<bool> status(true);))
-        */
+        // NOTE: explicit keyword means you can't do ArchiveStatus<bool> status = true; (must be ArchiveStatus<bool> status(true);))
+
+        // Constructor for success case (initializes object without throwing exceptions)
         explicit ArchiveStatus(const T value)
                 : value(value), error(ArchiveErrors::noError) {}
 
@@ -74,7 +85,7 @@ namespace ECE141 {
             }
         }
 
-        // Deleted copy constructor and copy assignment to make ArchiveStatus move-only
+        // NOTE: Delete copy constructor and copy assignment to make ArchiveStatus MOVE-ONLY
         ArchiveStatus(const ArchiveStatus&) = delete;
         ArchiveStatus& operator=(const ArchiveStatus&) = delete;
 
@@ -82,6 +93,7 @@ namespace ECE141 {
         ArchiveStatus(ArchiveStatus&&) noexcept = default;
         ArchiveStatus& operator=(ArchiveStatus&&) noexcept = default;
 
+        //get returned value (if no error in operation)
         T getValue() const {
             if (!isOK()) {
                 throw std::runtime_error("Operation failed with error");
@@ -100,6 +112,10 @@ namespace ECE141 {
         ArchiveErrors error;
     };
 
+    // Block sizing constants
+    constexpr size_t kBlockSize = 1024;
+    constexpr size_t kMetaSize = 100;
+    constexpr size_t kPayloadSize = kBlockSize - kMetaSize;
 
     //--------------------------------------------------------------------------------
     //You'll need to define your own classes for Blocks, and other useful types...
@@ -109,133 +125,125 @@ namespace ECE141 {
         Each block size = 1024 bytes exactly
         Block header <= 100 bytes
         Block payload >= 924 bytes 
-
         Block statuses = In Use, Free (stored in header as meta data)
-        What else do we need to store in header?
-         - Maybe info on where the next block is
-         - how many blocks the current file uses
-
         NOTE: Must fill unused blocks first before appending new blocks
         */
+
         Block();
-        Block(const Block &aBlock);
-        Block& operator=(const Block &aBlock);
+        Block(const Block &aBlock); //copy constructor
+        Block& operator=(const Block &aBlock); //copy assignment
         ~Block();
 
-        //block header (maybe we should make it a struct, enum?)
-        //Should we store header as stream of bytes?
-        //maybe some of this should be tracked in BlockStatus
+        //block header (metadata, should be less than 100 bytes)
         uint8_t status; //0 = free, 1 = in use
         uint8_t type; //0 = data, 1 = meta
-        uint8_t blockNumber; //block number
+        uint8_t blockNumber; //position in a sequence for multi-block file
         uint8_t blockCount; //how many blocks the current file uses
-        uint8_t blockHash; //hash of block
-        uint8_t blockLength; //length of block
-        uint8_t blockDataLength; //length of block data
-        uint8_t blockTypeLength; //length of block type
 
-        //block data payload
-        uint8_t blockData[924]; 
+        //file info (part of header) //Q: Why is name 80? how can we fit file info into header along with above data?
+        char fileName[80]; //null-terminated string
+        uint32_t fileSize; //total size of original file in bytes
+        time_t timeStamp; //stores time file was added to archive
+
+        //block data payload (924 bytes)
+        uint8_t blockData[kPayloadSize]; 
+
+        //current Block mode (free or in use)
         BlockMode mode;
     };
 
-    struct BlockStatus { //keep track of which blocks are free/occupied
-        BlockStatus();
-        BlockStatus(const BlockStatus &aBlockStatus) = delete;
-        BlockStatus& operator=(const BlockStatus &aBlockStatus) = delete;
-        ~BlockStatus();
+    void Archive::notifyObservers(ActionType anAction, const std::string &aName, bool status) {
+        for (auto& observer : observers) {
+            (*observer)(anAction, aName, status);
+        }
+    }
 
-        // Default move constructor and move assignment
-        BlockStatus(BlockStatus&&) noexcept = default;
-        BlockStatus& operator=(BlockStatus&&) noexcept = default;
+    //--------------------------------------------------------------------------------
+    //BLOCK MANAGER: Block status class (to keep track of free/occupied blocks)
+    //--------------------------------------------------------------------------------
 
-        //block status(this was autocomplete)
-
-    };
-
+    //BLOCK VISITOR: function to visit each block
     using BlockVisitor = std::function<bool(Block &aBlock, size_t aPos)>;
     
-    struct Chunker { //break up files into blocks
-        Chunker(std::fstream &aStream) {
-            aStream.seekg(0, std::ios::end);
-            streamSize = aStream.tellg();
-            aStream.seekg(0, std::ios::beg); //as if we never read
+    class Chunker {
+    public:
+        Chunker(std::fstream &aStream) : stream(aStream) {
+            stream.seekg(0, std::ios::end);
+            streamSize = stream.tellg();
+            stream.seekg(0, std::ios::beg);
         }
-        ~Chunker();
-        //we need to split the file into blocks
-
-        bool Chunk() {
-        //step 2: divide file size by block size
-        size_t theBlockCount = streamSize / 1024;
-        //step 3: read file in chunks of block size
-        for (size_t i = 0; i < theBlockCount; i++) {
-            //read block
-            blockData = aStream.read((char*)&theBlock, sizeof(Block));
-            //write block
-            createBlock(blockData); //writes block data to free block 
-            //^updates block status, keeps list of blocks and block number, etc.
-        }
-        return true;
-        }
-        bool each(BlockVisitor aVisitor, Block &aBlock) { //function professor showed in class
+        
+        bool each(BlockVisitor aVisitor) {
+            // Process file in block-sized chunks
+            size_t theLen = streamSize;
+            size_t theDelta = 0;
+            size_t thePos = 0;
+            bool theResult = true;
             
-        }  
-        protected:
-            std::fstream &stream;
-            size_t streamSize;
-            Block theBlock;
-            std::vector<Block> blocks;  
+            while (theLen && theResult) {
+                Block theBlock;
+                theLen -= theDelta = std::min(size_t(924), theLen);
+                stream.read(reinterpret_cast<char*>(theBlock.data), theDelta);
+                theResult = aVisitor(theBlock, thePos++);
+            }
+            
+            return theResult;
+        }
+        
+    protected:
+        std::fstream &stream;
+        size_t streamSize;
     };
 
     //What other classes/types do we need?
     //example code professor gave for Chunk class
     using VisitChunk = std::function<bool(Block &aBlock, size_t aPos)>;
 
-
-struct Chunker {
-    Chunker(std::fstream &aStream) : stream(aStream) {
-        stream.seekg(0, std::ios::end);
-        sSize = stream.tellg();
-        stream.seekg(0, std::ios::beg);
-    }
-
-    //visitor function
-    bool each(VisitChunk aCallback, Block &aBlock) { //takes in lambda and block
-        size_t theLen{sSize}, theDelta{0}, thePos{0};
-        bool theResult{true};
-        while(theLen && theResult) {
-            theLen -= theDelta = std::min(kPayloadSize, static_cast<size_t>(theLen));
-            stream.read(aBlock.payload, theDelta);
-            theResult = aCallback(aBlock, thePos++);
-        }
-        return theResult;
-    }
-protected:
-    std::fstream& stream;
-    size_t sSize;
-
-
-};
     
     class Archive {
     protected:
+        
+        //constructor
+        Archive(const std::string &aFullPath, AccessMode aMode);  //protected for factory pattern
+
+        bool readBlock(Block& aBlock, size_t anIndex);
+        bool writeBlock(Block& aBlock, size_t anIndex);
+
+        //data members
+        std::fstream stream; //file stream
+        std::string aPath; //file path
+        AccessMode mode; //mode to tell whether it's existing or new archive
+
+        //to integrate later (during final?)
         std::vector<std::shared_ptr<IDataProcessor>> processors;
         std::vector<std::shared_ptr<ArchiveObserver>> observers;
-        Archive(const std::string &aFullPath, AccessMode aMode);  //protected on purpose
-        Block theBlock;
-        std::fstream stream; //file stream
-        std::string aPath; //do we need this?
-        AccessMode mode; //do we need this?
 
     public:
 
         ~Archive();  
+
+        //static factory methods to create/open archive
         static    ArchiveStatus<std::shared_ptr<Archive>> createArchive(const std::string &anArchiveName);
         static    ArchiveStatus<std::shared_ptr<Archive>> openArchive(const std::string &anArchiveName);
 
-        //adds an observer to vector list (should it do anything else?)
+        //adds an observer to vector list
         Archive&  addObserver(std::shared_ptr<ArchiveObserver> anObserver);
 
+        /*CORE METHODS For Interface*/
+        ArchiveStatus<bool>      add(const std::string &aFilename); //Add a file
+        ArchiveStatus<bool>      extract(const std::string &aFilename, const std::string &aFullPath); //Extract a file
+        ArchiveStatus<bool>      remove(const std::string &aFilename); //Remove a file
+        ArchiveStatus<size_t>    list(std::ostream &aStream); //List files
+        ArchiveStatus<size_t>    debugDump(std::ostream &aStream); //dumps architecture of block storage for debugging
+
+        //next assignment:
+        ArchiveStatus<size_t>    compact(); //compacts archive
+
+        //UTILITY (get a file path)
+        ArchiveStatus<std::string> getFullPath() const; //get archive path (including .arc extension)
+
+
+        //ROUGH FUNCTION IMPLEMENTATIONS
         /*
         We need Archive functions to add, extract, remove, list, debug, 
         compact (do we need that rn? IDataProcessor is for next assignment), read, write, etc.
@@ -310,28 +318,11 @@ protected:
             //is this aSequenceName a file path?
 
             return false;
-        } 
-        bool Debug() {return false;} //What does this do??
-        bool Dump() {return false;} //What does this do??
-        bool Compact() {return false;} //IDataProcessor is for next assignment
-        
-
-        ArchiveStatus<bool>      add(const std::string &aFilename);
-        ArchiveStatus<bool>      extract(const std::string &aFilename, const std::string &aFullPath);
-        ArchiveStatus<bool>      remove(const std::string &aFilename);
-
-        ArchiveStatus<size_t>    list(std::ostream &aStream);
-        ArchiveStatus<size_t>    debugDump(std::ostream &aStream);
-
-        ArchiveStatus<size_t>    compact();
-        ArchiveStatus<std::string> getFullPath() const; //get archive path (including .arc extension)
-
-
+        }
 
         //STUDENT: add anything else you want here, (e.g. blocks?)...
         //Do we want this as private?
     };
-
 }
 
 #endif /* Archive_hpp */
