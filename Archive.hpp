@@ -152,12 +152,6 @@ namespace ECE141 {
         BlockMode mode;
     };
 
-    void Archive::notifyObservers(ActionType anAction, const std::string &aName, bool status) {
-        for (auto& observer : observers) {
-            (*observer)(anAction, aName, status);
-        }
-    }
-
     //--------------------------------------------------------------------------------
     //BLOCK MANAGER: Block status class (to keep track of free/occupied blocks)
     //--------------------------------------------------------------------------------
