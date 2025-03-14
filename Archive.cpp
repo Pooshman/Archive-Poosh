@@ -452,6 +452,8 @@ namespace ECE141 {
     //--------------------------------------------------------------------------------
     //COMPACT ARCHIVE: TODO (FINAL???)
     //--------------------------------------------------------------------------------
-    ArchiveStatus<size_t> Archive::compact() {}
+    ArchiveStatus<size_t> Archive::compact() {
+        return ArchiveStatus<size_t>(0);
+    }
 
 } // namespace ECE141

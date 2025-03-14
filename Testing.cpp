@@ -3,7 +3,7 @@
 
 // Simple test case for Archive
 TEST(ArchiveTest, CanCreateArchive) {
-    ArchiveStatus<std::shared_ptr<Archive>> archive = Archive::createArchive("test");
+    ECE141::ArchiveStatus<std::shared_ptr<ECE141::Archive>> archive = ECE141::Archive::createArchive("test");
     EXPECT_TRUE(archive.isOK());  // Check if archive creation succeeds
 }
 
