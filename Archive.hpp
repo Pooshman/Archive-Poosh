@@ -141,7 +141,7 @@ namespace ECE141 {
         uint8_t blockCount; //how many blocks the current file uses
 
         //file info (part of header) //Q: Why is name 80? how can we fit file info into header along with above data?
-        char fileName[80]; //null-terminated string
+        char filename[80]; //null-terminated string
         uint32_t fileSize; //total size of original file in bytes
         time_t timeStamp; //stores time file was added to archive
 
