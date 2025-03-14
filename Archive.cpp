@@ -165,4 +165,293 @@ namespace ECE141 {
         return stream.good();
     }
 
+    //--------------------------------------------------------------------------------
+    //ADD FILE TO ARCHIVE
+    //--------------------------------------------------------------------------------
+    ArchiveStatus<bool> Archive::add(const std::string &aFilename) {
+        // Extract just the filename part from the full path
+        std::string theName = extractFilename(aFilename);
+        
+        //check if file already exists in the archive
+        //look through existing blocks
+        Block theBlock;
+        size_t theBlockCount = 0;
+        while (readBlock(theBlock, theBlockCount)) {
+            if (theBlock.mode == BlockMode::inUse && strcmp(theBlock.filename, theName.c_str()) == 0) {
+                // File already exists in archive
+                notifyObservers(ActionType::added, theName, false);
+                return ArchiveStatus<bool>(ArchiveErrors::fileExists);
+            }
+            theBlockCount++;
+        }
+        
+        //open the source file
+        std::fstream sourceFile(aFilename, std::ios::in | std::ios::binary);
+        if (!sourceFile) {
+            notifyObservers(ActionType::added, theName, false);
+            return ArchiveStatus<bool>(ArchiveErrors::fileOpenError);
+        }
+        
+        // get file size
+        sourceFile.seekg(0, std::ios::end);
+        size_t fileSize = sourceFile.tellg();
+        sourceFile.seekg(0, std::ios::beg);
+        
+        // Calculate how many blocks we need
+        size_t blocksNeeded = calculateRequiredBlocks(fileSize);
+        
+        //Find free blocks
+        std::vector<size_t> freeBlocks;
+        theBlockCount = 0;
+        
+        //First pass: count total blocks
+        size_t totalBlocks = 0;
+        while (readBlock(theBlock, totalBlocks)) {
+            totalBlocks++;
+        }
+        
+        //Second pass: find free blocks
+        for (size_t i = 0; i < totalBlocks; i++) {
+            if (readBlock(theBlock, i) && theBlock.mode == BlockMode::free) {
+                freeBlocks.push_back(i);
+                if (freeBlocks.size() == blocksNeeded) break;
+            }
+        }
+        
+        //if we don't have enough free blocks add new ones at the end
+        while (freeBlocks.size() < blocksNeeded) {
+            freeBlocks.push_back(totalBlocks++);
+        }
+        
+        //prepare and write blocks
+        size_t remainingSize = fileSize;
+        time_t currentTime = time(nullptr);
+        
+        for (size_t i = 0; i < blocksNeeded; i++) {
+            Block newBlock;
+            newBlock.status = 1;  // In use
+            newBlock.type = 0;    // Data block
+            newBlock.blockNumber = i;
+            newBlock.blockCount = blocksNeeded;
+            newBlock.fileSize = fileSize;
+            newBlock.timeStamp = currentTime;
+            newBlock.mode = BlockMode::inUse;
+            strncpy(newBlock.filename, theName.c_str(), sizeof(newBlock.filename) - 1);
+            
+            //read data from source file
+            size_t bytesToRead = std::min(remainingSize, kPayloadSize);
+            sourceFile.read(reinterpret_cast<char*>(newBlock.data), bytesToRead);
+            remainingSize -= bytesToRead;
+            
+            //write block to archive
+            if (!writeBlock(newBlock, freeBlocks[i])) {
+                notifyObservers(ActionType::added, theName, false);
+                return ArchiveStatus<bool>(ArchiveErrors::fileWriteError);
+            }
+        }
+        
+        notifyObservers(ActionType::added, theName, true);
+        return ArchiveStatus<bool>(true);
+    }
+
+    //--------------------------------------------------------------------------------
+    //EXTRACT FILE FROM ARCHIVE
+    //--------------------------------------------------------------------------------
+    ArchiveStatus<bool> Archive::extract(const std::string &aFilename, const std::string &aFullPath) {
+        // Find the file in the archive
+        Block theBlock;
+        bool fileFound = false;
+        size_t blockIndex = 0;
+        
+        while (readBlock(theBlock, blockIndex)) {
+            if (theBlock.mode == BlockMode::inUse && strcmp(theBlock.filename, aFilename.c_str()) == 0) {
+                fileFound = true;
+                break;
+            }
+            blockIndex++;
+        }
+        
+        if (!fileFound) {
+            notifyObservers(ActionType::extracted, aFilename, false);
+            return ArchiveStatus<bool>(ArchiveErrors::fileNotFound);
+        }
+        
+        //create output file
+        std::fstream outputFile(aFullPath, std::ios::out | std::ios::binary | std::ios::trunc);
+        if (!outputFile) {
+            notifyObservers(ActionType::extracted, aFilename, false);
+            return ArchiveStatus<bool>(ArchiveErrors::fileOpenError);
+        }
+        
+        //get info about the file
+        size_t totalBlocks = theBlock.blockCount;
+        size_t fileSize = theBlock.fileSize;
+        size_t remainingSize = fileSize;
+        
+        //Find the first block
+        size_t currentBlock = 0;
+        while (currentBlock < blockIndex) {
+            if (readBlock(theBlock, currentBlock) && 
+                theBlock.mode == BlockMode::inUse && 
+                strcmp(theBlock.filename, aFilename.c_str()) == 0 && 
+                theBlock.blockNumber == 0) {
+                break;
+            }
+            currentBlock++;
+        }
+        
+        //extract all blocks in sequence
+        for (size_t i = 0; i < totalBlocks; i++) {
+            if (!readBlock(theBlock, currentBlock + i) || 
+                theBlock.mode != BlockMode::inUse || 
+                strcmp(theBlock.filename, aFilename.c_str()) != 0 ||
+                theBlock.blockNumber != i) {
+                
+                //find next block
+                bool foundNextBlock = false;
+                for (size_t j = 0; j < blockIndex; j++) {
+                    if (readBlock(theBlock, j) && 
+                        theBlock.mode == BlockMode::inUse && 
+                        strcmp(theBlock.filename, aFilename.c_str()) == 0 && 
+                        theBlock.blockNumber == i) {
+                        currentBlock = j - i;  //adjust the current block index
+                        foundNextBlock = true;
+                        break;
+                    }
+                }
+                
+                if (!foundNextBlock) {
+                    outputFile.close();
+                    notifyObservers(ActionType::extracted, aFilename, false);
+                    return ArchiveStatus<bool>(ArchiveErrors::badBlock);
+                }
+            }
+            
+            //write data to output file
+            size_t bytesToWrite = std::min(remainingSize, kPayloadSize);
+            outputFile.write(reinterpret_cast<char*>(theBlock.data), bytesToWrite);
+            remainingSize -= bytesToWrite;
+        }
+        
+        outputFile.close();
+        notifyObservers(ActionType::extracted, aFilename, true);
+        return ArchiveStatus<bool>(true);
+    }
+
+    //--------------------------------------------------------------------------------
+    //REMOVE FILE FROM ARCHIVE
+    //--------------------------------------------------------------------------------
+    ArchiveStatus<bool> Archive::remove(const std::string &aFilename) {
+        // Find all blocks for this file
+        std::vector<size_t> blockIndices;
+        Block theBlock;
+        size_t blockIndex = 0;
+        
+        while (readBlock(theBlock, blockIndex)) {
+            if (theBlock.mode == BlockMode::inUse && strcmp(theBlock.filename, aFilename.c_str()) == 0) {
+                blockIndices.push_back(blockIndex);
+            }
+            blockIndex++;
+        }
+        
+        if (blockIndices.empty()) {
+            notifyObservers(ActionType::removed, aFilename, false);
+            return ArchiveStatus<bool>(ArchiveErrors::fileNotFound);
+        }
+        
+        // Mark all blocks as free
+        for (size_t index : blockIndices) {
+            if (readBlock(theBlock, index)) {
+                theBlock.mode = BlockMode::free;
+                theBlock.status = 0;
+                memset(theBlock.filename, 0, sizeof(theBlock.filename));
+                if (!writeBlock(theBlock, index)) {
+                    notifyObservers(ActionType::removed, aFilename, false);
+                    return ArchiveStatus<bool>(ArchiveErrors::fileWriteError);
+                }
+            }
+        }
+        
+        notifyObservers(ActionType::removed, aFilename, true);
+        return ArchiveStatus<bool>(true);
+    }
+
+    //--------------------------------------------------------------------------------
+    //LIST ALL FILES IN ARCHIVE
+    //--------------------------------------------------------------------------------
+    ArchiveStatus<size_t> Archive::list(std::ostream &aStream) {
+        std::map<std::string, std::pair<size_t, time_t>> fileInfo;
+        Block theBlock;
+        size_t blockIndex = 0;
+        
+        // Gather information about all files
+        while (readBlock(theBlock, blockIndex)) {
+            if (theBlock.mode == BlockMode::inUse) {
+                // Only process first block of each file
+                if (theBlock.blockNumber == 0) {
+                    fileInfo[theBlock.filename] = std::make_pair(theBlock.fileSize, theBlock.timeStamp);
+                }
+            }
+            blockIndex++;
+        }
+        
+        // Output header
+        aStream << "###  name         size       date added\n";
+        aStream << "------------------------------------------------\n";
+        
+        // Output file information
+        size_t fileNumber = 1;
+        for (const auto &file : fileInfo) {
+            char timeBuffer[32];
+            struct tm *timeinfo = localtime(&file.second.second);
+            strftime(timeBuffer, sizeof(timeBuffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+            
+            aStream << fileNumber << ".   "
+                    << file.first << "    "
+                    << file.second.first << "    "
+                    << timeBuffer << "\n";
+            
+            fileNumber++;
+        }
+        
+        notifyObservers(ActionType::listed, "", true);
+        return ArchiveStatus<size_t>(fileInfo.size());
+    }
+
+    //--------------------------------------------------------------------------------
+    //DUMP Block organization for DEBUGGING
+    //--------------------------------------------------------------------------------
+    ArchiveStatus<size_t> Archive::debugDump(std::ostream &aStream) {
+        Block theBlock;
+        size_t blockIndex = 0;
+        size_t blockCount = 0;
+        
+        // Output header
+        aStream << "###  status   name    \n";
+        aStream << "-----------------------\n";
+        
+        // Examine all blocks
+        while (readBlock(theBlock, blockIndex)) {
+            blockCount++;
+            
+            aStream << blockIndex + 1 << ".   ";
+            
+            if (theBlock.mode == BlockMode::free) {
+                aStream << "empty    \n";
+            } else {
+                aStream << "used     " << theBlock.filename << "\n";
+            }
+            
+            blockIndex++;
+        }
+        
+        notifyObservers(ActionType::dumped, "", true);
+        return ArchiveStatus<size_t>(blockCount);
+    }
+
+    //--------------------------------------------------------------------------------
+    //COMPACT ARCHIVE: TODO (FINAL???)
+    //--------------------------------------------------------------------------------
+
+
 } // namespace ECE141
