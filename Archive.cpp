@@ -107,8 +107,62 @@ namespace ECE141 {
         }
     }
 
-    //--------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------
+//BLOCK METHODS
+//--------------------------------------------------------------------------------
+    // Block constructor
+    Block::Block() : status(0), type(0), blockNumber(0), blockCount(0), fileSize(0), 
+                    timeStamp(0), mode(BlockMode::free) {
+        memset(filename, 0, sizeof(filename));
+        memset(data, 0, sizeof(data));
+    }
 
+    // Block copy constructor
+    Block::Block(const Block &aBlock) : status(aBlock.status), type(aBlock.type),
+                                    blockNumber(aBlock.blockNumber), blockCount(aBlock.blockCount),
+                                    fileSize(aBlock.fileSize), timeStamp(aBlock.timeStamp),
+                                    mode(aBlock.mode) {
+        strncpy(filename, aBlock.filename, sizeof(filename));
+        memcpy(data, aBlock.data, sizeof(data));
+    }
 
-    
-}
+    // Block assignment operator
+    Block& Block::operator=(const Block &aBlock) {
+        if (this != &aBlock) {
+            status = aBlock.status;
+            type = aBlock.type;
+            blockNumber = aBlock.blockNumber;
+            blockCount = aBlock.blockCount;
+            fileSize = aBlock.fileSize;
+            timeStamp = aBlock.timeStamp;
+            mode = aBlock.mode;
+            strncpy(filename, aBlock.filename, sizeof(filename));
+            memcpy(data, aBlock.data, sizeof(data));
+        }
+        return *this;
+    }
+
+    // Block destructor
+    Block::~Block() {
+        // Nothing to clean up (all members are on stack)}
+    }
+
+    //READ BLOCK from the archive
+    bool Archive::readBlock(Block &aBlock, size_t anIndex) {
+        stream.seekg(anIndex * kBlockSize);
+        if (!stream) return false;
+        
+        stream.read(reinterpret_cast<char*>(&aBlock), sizeof(Block));
+        return stream.good();
+    }
+
+    //WRITE BLOCK to the archive
+    bool Archive::writeBlock(Block &aBlock, size_t anIndex) {
+        stream.seekp(anIndex * kBlockSize);
+        if (!stream) return false;
+        
+        stream.write(reinterpret_cast<const char*>(&aBlock), sizeof(Block));
+        return stream.good();
+    }
+
+} // namespace ECE141
