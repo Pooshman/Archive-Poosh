@@ -28,13 +28,23 @@ namespace ECE141 {
     //GLOBAL ENUMS
     enum class ActionType {added, extracted, removed, listed, dumped, compacted}; //actions that can be performed on archive
     enum class AccessMode {AsNew, AsExisting}; //mode to open archive
-    enum class BlockMode {free, inUse}; //block status
+    enum class BlockMode : uint8_t {free = 0, inUse = 1}; //block status
+    enum class BlockType : uint8_t {data = 0, metaData = 1}; //block type (not really used yet)
 
     /*
     NOTE: If the user called the "list", "compact", or "dump" commands on your archive, there is no specific document. In that case, 
     just pass an empty string as the value for the `aName` argument to the observers, along with the action-type, and the 
     result status.
     */
+
+    //GLOBAL UTILITY
+    size_t getStrmSize(std::fstream &aStream) {
+        aStream.seekg(0, std::ios::end);
+        size_t streamSize = aStream.tellg();
+        aStream.seekg(0, std::ios::beg);
+    
+        return streamSize;
+    }
 
     //--------------------------------------------------------------------------------
     //ARCHIVE OBSERVER: class to observe the actions of the archive
@@ -44,7 +54,6 @@ namespace ECE141 {
         virtual void operator()(ActionType anAction, const std::string &aName, bool status);
         virtual ~ArchiveObserver() = default;
     };
-
 
     //--------------------------------------------------------------------------------
     // IDATA PROCESSOR: Class to process files and reverse processing (i.e. compress, decompress)
@@ -134,9 +143,22 @@ namespace ECE141 {
         Block& operator=(const Block &aBlock); //copy assignment
         ~Block();
 
+        //to create new block
+        void initializeBlock(const std::string &filename, 
+            size_t blockNum, size_t totalBlocks, size_t fileSize, time_t timestamp) {
+                mode = BlockMode::inUse;
+                blockNumber = blockNum;
+                blockCount = totalBlocks;
+                this->fileSize = fileSize;
+                timeStamp = timestamp;
+                strncpy(this->filename, filename.c_str(), sizeof(this->filename) - 1);
+                this->filename[sizeof(this->filename) - 1] = '\0'; //nullterm
+            }
+
+
         //block header (metadata, should be less than 100 bytes)
-        uint8_t status; //0 = free, 1 = in use
-        uint8_t type; //0 = data, 1 = meta
+        BlockMode mode; //current Block mode (free or in use)
+        BlockType type; //0 = data, 1 = meta
         uint8_t blockNumber; //position in a sequence for multi-block file
         uint8_t blockCount; //how many blocks the current file uses
 
@@ -147,9 +169,6 @@ namespace ECE141 {
 
         //block data payload (924 bytes)
         uint8_t data[kPayloadSize]; 
-
-        //current Block mode (free or in use)
-        BlockMode mode;
     };
 
     //--------------------------------------------------------------------------------
@@ -160,23 +179,28 @@ namespace ECE141 {
         BlockManager() = default;
         
         // Find free blocks for file storage
-        size_t findFreeBlocks(size_t blockCount);
+        std::vector<size_t> findFreeBlocks(size_t blockCount);
         
         // Mark blocks as used or free
-        bool markBlocksAsUsed(size_t startBlock, size_t count);
-        bool markBlocksAsFree(size_t startBlock, size_t count);
+        ArchiveStatus<bool> markBlocksAsUsed(const std::vector<size_t>& blocks);
+        ArchiveStatus<bool> markBlocksAsFree(const std::vector<size_t>& blocks);
         
         // Track file locations
-        bool addFileEntry(const std::string& filename, size_t startBlock, size_t blockCount);
-        bool removeFileEntry(const std::string& filename);
-        std::pair<size_t, size_t> findFileEntry(const std::string& filename);
+        ArchiveStatus<bool> addFileEntry(const std::string& filename, const std::vector<size_t>& blocks);
+        ArchiveStatus<bool> removeFileEntry(const std::string& filename);
+        ArchiveStatus<std::vector<size_t>> findFileEntry(const std::string& filename);
         
         // Get all file entries for listing
-        std::map<std::string, std::pair<size_t, size_t>> getAllFileEntries() const;
+        std::map<std::string, std::vector<size_t>> getAllFileEntries() const;
+        // return total block count
+        size_t getTotalBlocks() const {
+            return blockStatus.size();
+        }
         
     private:
-        std::vector<bool> blockStatus; // Track free/used blocks
-        std::map<std::string, std::pair<size_t, size_t>> fileEntries; // filename -> (startBlock, blockCount)
+        //true = used, false = free
+        std::vector<BlockMode> blockStatus; // Track free/used blocks
+        std::map<std::string, std::vector<size_t>> fileEntries; // filename -> (startBlock, blockCount)
     };
 
 
@@ -189,14 +213,13 @@ namespace ECE141 {
     class Chunker {
 
     protected:
+    //& so we can take ptr to existing stream, not copy
         std::fstream &stream;
         size_t streamSize;
 
     public:
         Chunker(std::fstream &aStream) : stream(aStream) {
-            stream.seekg(0, std::ios::end);
-            streamSize = stream.tellg();
-            stream.seekg(0, std::ios::beg);
+            streamSize = getStreamSize(stream);
         }
         
         bool each(BlockVisitor aVisitor) {
@@ -208,13 +231,20 @@ namespace ECE141 {
             
             while (theLen && theResult) {
                 Block theBlock;
+                //process file data in at most 924 byte chunks
                 theLen -= theDelta = std::min(size_t(924), theLen);
                 stream.read(reinterpret_cast<char*>(theBlock.data), theDelta);
+
+                //callback the visitor! to do whatever to each block, i.e. extract
                 theResult = aVisitor(theBlock, thePos++);
             }
             
+            //if all blocks processed, returns true
+            //if we stopped early, returns false
             return theResult;
         }
+
+        ~Chunker(); //not needed!
     };
 
     //What other classes/types do we need?
@@ -254,7 +284,7 @@ namespace ECE141 {
         static    ArchiveStatus<std::shared_ptr<Archive>> createArchive(const std::string &anArchiveName);
         static    ArchiveStatus<std::shared_ptr<Archive>> openArchive(const std::string &anArchiveName);
 
-        //adds an observer to vector list
+        //adds an observer to vector list (returns Archive& for chaining to same arc)
         Archive&  addObserver(std::shared_ptr<ArchiveObserver> anObserver);
 
         /*CORE METHODS For Interface*/
@@ -264,90 +294,11 @@ namespace ECE141 {
         ArchiveStatus<size_t>    list(std::ostream &aStream); //List files
         ArchiveStatus<size_t>    debugDump(std::ostream &aStream); //dumps architecture of block storage for debugging
 
-        //next assignment:
+        //returns new # blocks in compacted archive
         ArchiveStatus<size_t>    compact(); //compacts archive
 
         //UTILITY (get a file path)
         ArchiveStatus<std::string> getFullPath() const; //get archive path (including .arc extension)
-
-
-        // //ROUGH FUNCTION IMPLEMENTATIONS
-        // /*
-        // We need Archive functions to add, extract, remove, list, debug, 
-        // compact (do we need that rn? IDataProcessor is for next assignment), read, write, etc.
-        // */
-        // Archive createArchive() {
-        //     if (mode == AccessMode::AsNew) {
-        //         //create the Archive
-        //         //initialize stream, opener or something?
-        //     }
-        //     else {
-        //         throw std::runtime_error("Cannot create archive in existing file");
-        //     }
-        // };
-
-        // bool openArchive() {
-        //     if (mode == AccessMode::AsExisting) {
-        //         stream.open(aPath, std::ios::in | std::ios::out | std::ios::binary);
-        //         if (!stream.is_open()) {
-        //             throw std::runtime_error("Failed to open archive");
-        //         }
-        //         return true;
-        //     }
-        //     else {
-        //         throw std::runtime_error("Cannot open archive in new file");
-        //     }
-        // }
-
-        // bool readBlock(Block &aBlock, size_t anIndex) {
-        //     //move read pointer to block anIndex
-        //     stream.seekg(anIndex * blockSize);
-        //     //read block
-        //     stream.read((char*)&aBlock, sizeof(Block));
-        //     //stream error checking
-        //     bool theResult{stream};
-        //     return theResult;
-        // };
-        // bool writeBlock(Block &aBlock, size_t anIndex) {
-        //     //move write pointer to index
-        //     stream.seekp(anIndex * blockSize);
-        //     //write to block
-        //     stream.write((char*)&aBlock, sizeof(Block));
-        //     //stream error checking
-        //     bool theResult{stream}; //why {}? How does this work?
-        //     return theResult;
-        // }
-        // bool addFile(const std::string &aPath) {
-        //     //check duplicate, make sure path doesn't exist yet
-        //     if (verifyPath(aPath)) {
-        //         //open file stream
-        //         std::fstream theStream(aPath);
-        //         if (theStream.good()) {
-        //             Block theBlock;
-        //             Chunker theChunk;
-        //             //
-        //         }
-        //     }
-        //     return false;
-        // }
-        // bool removeFile(const std::string &aPath) {
-        //     if (verifyPath(aPath)) {
-        //         //find blocks corresponding to file
-        //         //remove blocks, mark them free (BLOCKSTATUS)
-        //         //close file stream
-        //         return true;
-        //     }
-        //     return false;
-        // }
-        // bool List(const std::string &aSequenceName) { //list files?
-        //     return false;
-        // } 
-        // bool Extract(const std::string &aSequenceName) { //extract file data
-        //     //is this aSequenceName a file path?
-
-        //     return false;
-        // }
     };
 }
-
 #endif /* Archive_hpp */
