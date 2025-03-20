@@ -37,15 +37,6 @@ namespace ECE141 {
     result status.
     */
 
-    //GLOBAL UTILITY
-    size_t getStrmSize(std::fstream &aStream) {
-        aStream.seekg(0, std::ios::end);
-        size_t streamSize = aStream.tellg();
-        aStream.seekg(0, std::ios::beg);
-    
-        return streamSize;
-    }
-
     //--------------------------------------------------------------------------------
     //ARCHIVE OBSERVER: class to observe the actions of the archive
     //- Kinda like a composite! (storing list of Observers, calling their operator())
@@ -219,7 +210,9 @@ namespace ECE141 {
 
     public:
         Chunker(std::fstream &aStream) : stream(aStream) {
-            streamSize = getStreamSize(stream);
+            stream.seekg(0, std::ios::end);
+            streamSize = stream.tellg();
+            stream.seekg(0, std::ios::beg);
         }
         
         bool each(BlockVisitor aVisitor) {

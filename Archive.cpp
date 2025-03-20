@@ -187,7 +187,9 @@ namespace ECE141 {
         }
         
         //get file size and calculate blocks needed
-        size_t fileSize = getStrmSize(sourceFile);
+        sourceFile.seekg(0, std::ios::end);
+        size_t fileSize = sourceFile.tellg();
+        sourceFile.seekg(0, std::ios::beg);
         size_t blocksNeeded = calculateRequiredBlocks(fileSize);
         
         //Find free blocks
